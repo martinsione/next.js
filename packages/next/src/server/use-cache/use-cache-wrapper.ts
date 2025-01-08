@@ -33,36 +33,16 @@ import {
   getClientReferenceManifestForRsc,
   getServerModuleMap,
 } from '../app-render/encryption-utils'
-import DefaultCacheHandler from '../lib/cache-handlers/default'
 import type { CacheHandler, CacheEntry } from '../lib/cache-handlers/types'
 import type { CacheSignal } from '../app-render/cache-signal'
+import { decryptActionBoundArgs } from '../app-render/encryption'
+import { InvariantError } from '../../shared/lib/invariant-error'
+import { getDigestForWellKnownError } from '../app-render/create-error-handler'
+import { cacheHandlerGlobal, DYNAMIC_EXPIRE } from './constants'
 
 const isEdgeRuntime = process.env.NEXT_RUNTIME === 'edge'
 
-// If the expire time is less than .
-const DYNAMIC_EXPIRE = 300
-
-const cacheHandlersSymbol = Symbol.for('@next/cache-handlers')
-const _globalThis: typeof globalThis & {
-  [cacheHandlersSymbol]?: {
-    RemoteCache?: CacheHandler
-    DefaultCache?: CacheHandler
-  }
-  __nextCacheHandlers?: Record<string, CacheHandler>
-} = globalThis
-
-const cacheHandlerMap: Map<string, CacheHandler> = new Map([
-  [
-    'default',
-    _globalThis[cacheHandlersSymbol]?.DefaultCache || DefaultCacheHandler,
-  ],
-  [
-    'remote',
-    // in dev remote maps to default handler
-    // and is meant to be overridden in prod
-    _globalThis[cacheHandlersSymbol]?.RemoteCache || DefaultCacheHandler,
-  ],
-])
+const cacheHandlerMap: Map<string, CacheHandler> = new Map()
 
 function generateCacheEntry(
   workStore: WorkStore,
@@ -328,8 +308,20 @@ async function generateCacheEntryImpl(
       environmentName: 'Cache',
       signal: controller.signal,
       temporaryReferences,
-      onError(error: unknown) {
-        // Report the error.
+      // In the "Cache" environment, we only need to make sure that the error
+      // digests are handled correctly. Error formatting and reporting is not
+      // necessary here; the errors are encoded in the stream, and will be
+      // reported in the "Server" environment.
+      onError: (error) => {
+        const digest = getDigestForWellKnownError(error)
+
+        if (digest) {
+          return digest
+        }
+
+        // TODO: For now we're also reporting the error here, because in
+        // production, the "Server" environment will only get the obfuscated
+        // error (created by the Flight Client in the cache wrapper).
         console.error(error)
         errors.push(error)
       },
@@ -433,14 +425,14 @@ function createTrackedReadableStream(
   })
 }
 
-export function cache(kind: string, id: string, fn: any) {
-  if (!process.env.__NEXT_DYNAMIC_IO) {
-    throw new Error(
-      '"use cache" is only available with the experimental.dynamicIO config.'
-    )
-  }
+export function cache(
+  kind: string,
+  id: string,
+  boundArgsLength: number,
+  fn: any
+) {
   for (const [key, value] of Object.entries(
-    _globalThis.__nextCacheHandlers || {}
+    cacheHandlerGlobal.__nextCacheHandlers || {}
   )) {
     cacheHandlerMap.set(key, value as CacheHandler)
   }
@@ -493,6 +485,31 @@ export function cache(kind: string, id: string, fn: any) {
           // or not at all if we don't end up waiting for the input.
           process.nextTick(() => controller.abort())
         }
+      }
+
+      if (boundArgsLength > 0) {
+        if (args.length === 0) {
+          throw new InvariantError(
+            `Expected the "use cache" function ${JSON.stringify(fn.name)} to receive its encrypted bound arguments as the first argument.`
+          )
+        }
+
+        const encryptedBoundArgs = args.shift()
+        const boundArgs = await decryptActionBoundArgs(id, encryptedBoundArgs)
+
+        if (!Array.isArray(boundArgs)) {
+          throw new InvariantError(
+            `Expected the bound arguments of "use cache" function ${JSON.stringify(fn.name)} to deserialize into an array, got ${typeof boundArgs} instead.`
+          )
+        }
+
+        if (boundArgsLength !== boundArgs.length) {
+          throw new InvariantError(
+            `Expected the "use cache" function ${JSON.stringify(fn.name)} to receive ${boundArgsLength} bound arguments, got ${boundArgs.length} instead.`
+          )
+        }
+
+        args.unshift(boundArgs)
       }
 
       const temporaryReferences = createClientTemporaryReferenceSet()

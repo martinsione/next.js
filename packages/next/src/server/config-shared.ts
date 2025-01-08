@@ -23,20 +23,20 @@ export type NextConfigComplete = Required<NextConfig> & {
   configFileName: string
 }
 
-export type I18NDomains = DomainLocale[]
+export type I18NDomains = readonly DomainLocale[]
 
 export interface I18NConfig {
   defaultLocale: string
   domains?: I18NDomains
   localeDetection?: false
-  locales: string[]
+  locales: readonly string[]
 }
 
 export interface DomainLocale {
   defaultLocale: string
   domain: string
   http?: true
-  locales?: string[]
+  locales?: readonly string[]
 }
 
 export interface ESLintConfig {
@@ -146,21 +146,14 @@ export interface ExperimentalTurboOptions {
   rules?: Record<string, TurboRuleConfigItemOrShortcut>
 
   /**
-   * Use swc_css instead of lightningcss for Turbopack
-   */
-  useSwcCss?: boolean
-
-  /**
    * A target memory limit for turbo, in bytes.
    */
   memoryLimit?: number
 
   /**
    * Enable persistent caching for the turbopack dev server and build.
-   * Need to provide the expected level of stability, otherwise it will fail.
-   * Currently stability level: 1
    */
-  unstablePersistentCaching?: number | false
+  unstablePersistentCaching?: boolean
 
   /**
    * Enable tree shaking for the turbopack dev server and build.
@@ -250,10 +243,10 @@ export interface ExperimentalConfig {
   }
   multiZoneDraftMode?: boolean
   appNavFailHandling?: boolean
-  flyingShuttle?: { mode?: 'full' | 'store-only' }
   prerenderEarlyExit?: boolean
   linkNoTouchStart?: boolean
   caseSensitiveRoutes?: boolean
+  clientSegmentCache?: boolean
   appDocumentPreloading?: boolean
   preloadEntriesOnStart?: boolean
   /** @default true */
@@ -303,12 +296,12 @@ export interface ExperimentalConfig {
   middlewarePrefetch?: 'strict' | 'flexible'
   manualClientBasePath?: boolean
   /**
-   * CSS Chunking strategy. Defaults to 'loose', which guesses dependencies
+   * CSS Chunking strategy. Defaults to `true` ("loose" mode), which guesses dependencies
    * between CSS files to keep ordering of them.
    * An alternative is 'strict', which will try to keep correct ordering as
    * much as possible, even when this leads to many requests.
    */
-  cssChunking?: 'strict' | 'loose'
+  cssChunking?: boolean | 'strict'
   disablePostcssPresetEnv?: boolean
   cpus?: number
   memoryBasedWorkersCount?: boolean
@@ -533,11 +526,6 @@ export interface ExperimentalConfig {
   reactCompiler?: boolean | ReactCompilerOptions
 
   /**
-   * Enables `unstable_after`
-   */
-  after?: boolean
-
-  /**
    * The number of times to retry static generation (per page) before giving up.
    */
   staticGenerationRetryCount?: number
@@ -562,12 +550,51 @@ export interface ExperimentalConfig {
    * unless explicitly cached.
    */
   dynamicIO?: boolean
+
+  /**
+   * Render <style> tags inline in the HTML for imported CSS assets.
+   * Supports app-router in production mode only.
+   */
+  inlineCss?: boolean
+
+  // TODO: Remove this config when the API is stable.
+  /**
+   * This config allows you to enable the experimental navigation API `forbidden` and `unauthorized`.
+   */
+  authInterrupts?: boolean
+
+  /**
+   * Enables the new dev overlay.
+   */
+  newDevOverlay?: boolean
 }
 
 export type ExportPathMap = {
   [path: string]: {
     page: string
     query?: NextParsedUrlQuery
+
+    /**
+     * When true, this indicates that this is a pages router page that should
+     * be rendered as a fallback.
+     *
+     * @internal
+     */
+    _pagesFallback?: boolean
+
+    /**
+     * The locale that this page should be rendered in.
+     *
+     * @internal
+     */
+    _locale?: string
+
+    /**
+     * The path that was used to generate the page.
+     *
+     * @internal
+     */
+    _ssgPath?: string
 
     /**
      * The parameters that are currently unknown.
@@ -608,7 +635,7 @@ export type ExportPathMap = {
  *
  * This can change the behavior, enable experimental features, and configure other advanced options.
  *
- * Read more: [Next.js Docs: `next.config.js`](https://nextjs.org/docs/api-reference/next.config.js/introduction)
+ * Read more: [Next.js Docs: `next.config.js`](https://nextjs.org/docs/app/api-reference/config/next-config-js)
  */
 export interface NextConfig extends Record<string, any> {
   exportPathMap?: (
@@ -643,14 +670,14 @@ export interface NextConfig extends Record<string, any> {
   /**
    * Headers allow you to set custom HTTP headers for an incoming request path.
    *
-   * @see [Headers configuration documentation](https://nextjs.org/docs/api-reference/next.config.js/headers)
+   * @see [Headers configuration documentation](https://nextjs.org/docs/app/api-reference/config/next-config-js/headers)
    */
   headers?: () => Promise<Header[]>
 
   /**
    * Rewrites allow you to map an incoming request path to a different destination path.
    *
-   * @see [Rewrites configuration documentation](https://nextjs.org/docs/api-reference/next.config.js/rewrites)
+   * @see [Rewrites configuration documentation](https://nextjs.org/docs/app/api-reference/config/next-config-js/rewrites)
    */
   rewrites?: () => Promise<
     | Rewrite[]
@@ -664,7 +691,7 @@ export interface NextConfig extends Record<string, any> {
   /**
    * Redirects allow you to redirect an incoming request path to a different destination path.
    *
-   * @see [Redirects configuration documentation](https://nextjs.org/docs/api-reference/next.config.js/redirects)
+   * @see [Redirects configuration documentation](https://nextjs.org/docs/app/api-reference/config/next-config-js/redirects)
    */
   redirects?: () => Promise<Redirect[]>
 
@@ -676,7 +703,7 @@ export interface NextConfig extends Record<string, any> {
   /**
    * Before continuing to add custom webpack configuration to your application make sure Next.js doesn't already support your use-case
    *
-   * @see [Custom Webpack Config documentation](https://nextjs.org/docs/api-reference/next.config.js/custom-webpack-config)
+   * @see [Custom Webpack Config documentation](https://nextjs.org/docs/app/api-reference/config/next-config-js/webpack)
    */
   webpack?: NextJsWebpackConfig | null
 
@@ -684,14 +711,14 @@ export interface NextConfig extends Record<string, any> {
    * By default Next.js will redirect urls with trailing slashes to their counterpart without a trailing slash.
    *
    * @default false
-   * @see [Trailing Slash Configuration](https://nextjs.org/docs/api-reference/next.config.js/trailing-slash)
+   * @see [Trailing Slash Configuration](https://nextjs.org/docs/app/api-reference/config/next-config-js/trailingSlash)
    */
   trailingSlash?: boolean
 
   /**
    * Next.js comes with built-in support for environment variables
    *
-   * @see [Environment Variables documentation](https://nextjs.org/docs/api-reference/next.config.js/environment-variables)
+   * @see [Environment Variables documentation](https://nextjs.org/docs/app/api-reference/config/next-config-js/env)
    */
   env?: Record<string, string | undefined>
 
@@ -708,7 +735,7 @@ export interface NextConfig extends Record<string, any> {
   /**
    * To set up a CDN, you can set up an asset prefix and configure your CDN's origin to resolve to the domain that Next.js is hosted on.
    *
-   * @see [CDN Support with Asset Prefix](https://nextjs.org/docs/api-reference/next.config.js/cdn-support-with-asset-prefix)
+   * @see [CDN Support with Asset Prefix](https://nextjs.org/docs/app/api-reference/config/next-config-js/assetPrefix)
    */
   assetPrefix?: string
 
@@ -737,20 +764,20 @@ export interface NextConfig extends Record<string, any> {
   useFileSystemPublicRoutes?: boolean
 
   /**
-   * @see [Configuring the build ID](https://nextjs.org/docs/api-reference/next.config.js/configuring-the-build-id)
+   * @see [Configuring the build ID](https://nextjs.org/docs/app/api-reference/config/next-config-js/generateBuildId)
    */
   generateBuildId?: () => string | null | Promise<string | null>
 
-  /** @see [Disabling ETag Configuration](https://nextjs.org/docs/api-reference/next.config.js/disabling-etag-generation) */
+  /** @see [Disabling ETag Configuration](https://nextjs.org/docs/app/api-reference/config/next-config-js/generateEtags) */
   generateEtags?: boolean
 
-  /** @see [Including non-page files in the pages directory](https://nextjs.org/docs/api-reference/next.config.js/custom-page-extensions) */
+  /** @see [Including non-page files in the pages directory](https://nextjs.org/docs/app/api-reference/config/next-config-js/pageExtensions) */
   pageExtensions?: string[]
 
-  /** @see [Compression documentation](https://nextjs.org/docs/api-reference/next.config.js/compression) */
+  /** @see [Compression documentation](https://nextjs.org/docs/app/api-reference/config/next-config-js/compress) */
   compress?: boolean
 
-  /** @see [Disabling x-powered-by](https://nextjs.org/docs/api-reference/next.config.js/disabling-x-powered-by) */
+  /** @see [Disabling x-powered-by](https://nextjs.org/docs/app/api-reference/config/next-config-js/poweredByHeader) */
   poweredByHeader?: boolean
 
   /** @see [Using the Image Component](https://nextjs.org/docs/app/api-reference/next-config-js/images) */
@@ -773,7 +800,7 @@ export interface NextConfig extends Record<string, any> {
   /**
    * Next.js exposes some options that give you some control over how the server will dispose or keep in memory built pages in development.
    *
-   * @see [Configuring `onDemandEntries`](https://nextjs.org/docs/api-reference/next.config.js/configuring-onDemandEntries)
+   * @see [Configuring `onDemandEntries`](https://nextjs.org/docs/app/api-reference/config/next-config-js/onDemandEntries)
    */
   onDemandEntries?: {
     /** period (in ms) where the server will keep pages in the buffer */
@@ -795,7 +822,7 @@ export interface NextConfig extends Record<string, any> {
   /**
    * Deploy a Next.js application under a sub-path of a domain
    *
-   * @see [Base path configuration](https://nextjs.org/docs/api-reference/next.config.js/basepath)
+   * @see [Base path configuration](https://nextjs.org/docs/app/api-reference/config/next-config-js/basePath)
    */
   basePath?: string
 
@@ -821,7 +848,7 @@ export interface NextConfig extends Record<string, any> {
   /**
    * The Next.js runtime is Strict Mode-compliant.
    *
-   * @see [React Strict Mode](https://nextjs.org/docs/api-reference/next.config.js/react-strict-mode)
+   * @see [React Strict Mode](https://nextjs.org/docs/app/api-reference/config/next-config-js/reactStrictMode)
    */
   reactStrictMode?: boolean | null
 
@@ -829,21 +856,21 @@ export interface NextConfig extends Record<string, any> {
    * The maximum length of the headers that are emitted by React and added to
    * the response.
    *
-   * @see [React Max Headers Length](https://nextjs.org/docs/api-reference/next.config.js/react-max-headers-length)
+   * @see [React Max Headers Length](https://nextjs.org/docs/app/api-reference/config/next-config-js/reactMaxHeadersLength)
    */
   reactMaxHeadersLength?: number
 
   /**
    * Add public (in browser) runtime configuration to your app
    *
-   * @see [Runtime configuration](https://nextjs.org/docs/api-reference/next.config.js/runtime-configuration)
+   * @see [Runtime configuration](https://nextjs.org/docs/pages/api-reference/config/next-config-js/runtime-configuration
    */
   publicRuntimeConfig?: { [key: string]: any }
 
   /**
    * Add server runtime configuration to your app
    *
-   * @see [Runtime configuration](https://nextjs.org/docs/api-reference/next.config.js/runtime-configuration)
+   * @see [Runtime configuration](https://nextjs.org/docs/pages/api-reference/config/next-config-js/runtime-configuration
    */
   serverRuntimeConfig?: { [key: string]: any }
 
@@ -900,6 +927,12 @@ export interface NextConfig extends Record<string, any> {
       | {
           useLightningcss?: boolean
         }
+
+    /**
+     * Replaces variables in your code during compile time. Each key will be
+     * replaced with the respective values.
+     */
+    define?: Record<string, string>
   }
 
   /**
@@ -1078,18 +1111,15 @@ export const defaultConfig: NextConfig = {
       remote: process.env.NEXT_REMOTE_CACHE_HANDLER_PATH,
       static: process.env.NEXT_STATIC_CACHE_HANDLER_PATH,
     },
+    cssChunking: true,
     multiZoneDraftMode: false,
-    appNavFailHandling: Boolean(process.env.NEXT_PRIVATE_FLYING_SHUTTLE),
-    flyingShuttle: Boolean(process.env.NEXT_PRIVATE_FLYING_SHUTTLE)
-      ? {
-          mode: 'full',
-        }
-      : undefined,
+    appNavFailHandling: false,
     prerenderEarlyExit: true,
     serverMinification: true,
     serverSourceMaps: false,
     linkNoTouchStart: false,
     caseSensitiveRoutes: false,
+    clientSegmentCache: false,
     appDocumentPreloading: undefined,
     preloadEntriesOnStart: true,
     clientRouterFilter: true,
@@ -1142,6 +1172,7 @@ export const defaultConfig: NextConfig = {
         process.env.__NEXT_TEST_MODE &&
         process.env.__NEXT_EXPERIMENTAL_PPR === 'true'
       ),
+    authInterrupts: false,
     reactOwnerStack: false,
     webpackBuildWorker: undefined,
     webpackMemoryOptimizations: false,
@@ -1153,12 +1184,13 @@ export const defaultConfig: NextConfig = {
     },
     allowDevelopmentBuild: undefined,
     reactCompiler: undefined,
-    after: false,
     staticGenerationRetryCount: undefined,
     serverComponentsHmrCache: true,
     staticGenerationMaxConcurrency: 8,
     staticGenerationMinPagesPerWorker: 25,
     dynamicIO: false,
+    inlineCss: false,
+    newDevOverlay: false,
   },
   bundlePagesRouterDependencies: false,
 }

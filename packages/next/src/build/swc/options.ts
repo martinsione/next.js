@@ -1,3 +1,4 @@
+import path from 'path'
 import { WEBPACK_LAYERS, type WebpackLayerName } from '../../lib/constants'
 import type {
   NextConfig,
@@ -7,9 +8,13 @@ import type {
 } from '../../server/config-shared'
 import type { ResolvedBaseUrl } from '../load-jsconfig'
 import { isWebpackServerOnlyLayer, isWebpackAppPagesLayer } from '../utils'
+import { escapeStringRegexp } from '../../shared/lib/escape-regexp'
 
-const nextDistPath =
-  /(next[\\/]dist[\\/]shared[\\/]lib)|(next[\\/]dist[\\/]client)|(next[\\/]dist[\\/]pages)/
+const nextDirname = path.dirname(require.resolve('next/package.json'))
+
+const nextDistPath = new RegExp(
+  `${escapeStringRegexp(nextDirname)}[\\/]dist[\\/](shared[\\/]lib|client|pages)`
+)
 
 const nodeModulesPath = /[\\/]node_modules[\\/]/
 
@@ -65,6 +70,7 @@ function getBaseSWCOptions({
   serverReferenceHashSalt,
   bundleLayer,
   isDynamicIo,
+  cacheHandlers,
 }: {
   filename: string
   jest?: boolean
@@ -82,6 +88,7 @@ function getBaseSWCOptions({
   serverReferenceHashSalt: string
   bundleLayer?: WebpackLayerName
   isDynamicIo?: boolean
+  cacheHandlers?: ExperimentalConfig['cacheHandlers']
 }) {
   const isReactServerLayer = isWebpackServerOnlyLayer(bundleLayer)
   const isAppRouterPagesLayer = isWebpackAppPagesLayer(bundleLayer)
@@ -208,11 +215,10 @@ function getBaseSWCOptions({
     serverActions:
       isAppRouterPagesLayer && !jest
         ? {
-            // always enable server actions
-            // TODO: remove this option
-            enabled: true,
             isReactServerLayer,
+            dynamicIoEnabled: isDynamicIo,
             hashSalt: serverReferenceHashSalt,
+            cacheKinds: cacheHandlers ? Object.keys(cacheHandlers) : [],
           }
         : undefined,
     // For app router we prefer to bundle ESM,
@@ -357,6 +363,7 @@ export function getLoaderSWCOptions({
   serverReferenceHashSalt,
   bundleLayer,
   esm,
+  cacheHandlers,
 }: {
   filename: string
   development: boolean
@@ -381,6 +388,7 @@ export function getLoaderSWCOptions({
   serverComponents?: boolean
   serverReferenceHashSalt: string
   bundleLayer?: WebpackLayerName
+  cacheHandlers: ExperimentalConfig['cacheHandlers']
 }) {
   let baseOptions: any = getBaseSWCOptions({
     filename,
@@ -398,6 +406,7 @@ export function getLoaderSWCOptions({
     serverReferenceHashSalt,
     esm: !!esm,
     isDynamicIo,
+    cacheHandlers,
   })
   baseOptions.fontLoaders = {
     fontLoaders: ['next/font/local', 'next/font/google'],

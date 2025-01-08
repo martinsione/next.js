@@ -31,7 +31,11 @@ import {
 } from '../helpers/hydration-error-info'
 import { NodejsInspectorCopyButton } from '../components/nodejs-inspector'
 import { CopyButton } from '../components/copy-button'
-import { isUnhandledConsoleOrRejection } from '../helpers/console-error'
+import {
+  getUnhandledErrorType,
+  isUnhandledConsoleOrRejection,
+} from '../helpers/console-error'
+import { extractNextErrorCode } from '../../../../../lib/error-telemetry-utils'
 
 export type SupportedErrorEvent = {
   id: number
@@ -62,12 +66,19 @@ function ErrorDescription({
   hydrationWarning: string | null
 }) {
   const isUnhandledOrReplayError = isUnhandledConsoleOrRejection(error)
+  const unhandledErrorType = isUnhandledOrReplayError
+    ? getUnhandledErrorType(error)
+    : null
+  const isConsoleErrorStringMessage = unhandledErrorType === 'string'
   // If the error is:
   // - hydration warning
   // - captured console error or unhandled rejection
   // skip displaying the error name
   const title =
-    isUnhandledOrReplayError || hydrationWarning ? '' : error.name + ': '
+    (isUnhandledOrReplayError && isConsoleErrorStringMessage) ||
+    hydrationWarning
+      ? ''
+      : error.name + ': '
 
   // If it's replayed error, display the environment name
   const environmentName =
@@ -245,7 +256,7 @@ export function Errors({
             <line x1="12" y1="16" x2="12.01" y2="16"></line>
           </svg>
           <span>
-            {readyErrors.length} error{readyErrors.length > 1 ? 's' : ''}
+            {readyErrors.length} issue{readyErrors.length > 1 ? 's' : ''}
           </span>
           <button
             data-nextjs-toast-errors-hide-button
@@ -255,7 +266,7 @@ export function Errors({
               e.stopPropagation()
               hide()
             }}
-            aria-label="Hide Errors"
+            aria-label="Hide Issues"
           >
             <CloseIcon />
           </button>
@@ -305,13 +316,16 @@ export function Errors({
                 <span data-nextjs-dialog-header-total-count>
                   {readyErrors.length}
                 </span>
-                {' error'}
+                {' issue'}
                 {readyErrors.length < 2 ? '' : 's'}
               </small>
               <VersionStalenessInfo versionInfo={versionInfo} />
             </LeftRightDialogHeader>
 
-            <div className="nextjs__container_errors__error_title">
+            <div
+              className="nextjs__container_errors__error_title"
+              data-nextjs-error-code={extractNextErrorCode(error)} // allow assertion in tests before error rating is implemented
+            >
               <h1
                 id="nextjs__container_errors_label"
                 className="nextjs__container_errors_label"

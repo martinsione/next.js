@@ -3,12 +3,12 @@ import { nextTestSetup } from 'e2e-utils'
 import { retry } from 'next-test-utils'
 import { createProxyServer } from 'next/experimental/testmode/proxy'
 import { outdent } from 'outdent'
-import { sandbox } from '../../../lib/development-sandbox'
+import { createSandbox } from '../../../lib/development-sandbox'
 import * as Log from './utils/log'
 
 const runtimes = ['nodejs', 'edge']
 
-describe.each(runtimes)('unstable_after() in %s runtime', (runtimeValue) => {
+describe.each(runtimes)('after() in %s runtime', (runtimeValue) => {
   const { next, isNextDeploy, skipped } = nextTestSetup({
     files: __dirname,
     // `patchFile` and reading runtime logs are not supported in a deployed environment
@@ -82,7 +82,7 @@ describe.each(runtimes)('unstable_after() in %s runtime', (runtimeValue) => {
     // TODO: server seems to close before the response fully returns?
   })
 
-  it('runs callbacks from nested unstable_after calls', async () => {
+  it('runs callbacks from nested after calls', async () => {
     await next.browser(pathPrefix + '/nested-after')
 
     await retry(() => {
@@ -244,7 +244,7 @@ describe.each(runtimes)('unstable_after() in %s runtime', (runtimeValue) => {
 
   it('does not allow modifying cookies in a callback', async () => {
     const EXPECTED_ERROR =
-      /An error occurred in a function passed to `unstable_after\(\)`: .+?: Cookies can only be modified in a Server Action or Route Handler\./
+      /An error occurred in a function passed to `after\(\)`: .+?: Cookies can only be modified in a Server Action or Route Handler\./
 
     const browser = await next.browser(pathPrefix + '/123/setting-cookies')
     // after() from render
@@ -270,10 +270,29 @@ describe.each(runtimes)('unstable_after() in %s runtime', (runtimeValue) => {
   })
 
   describe('uses waitUntil from request context if available', () => {
-    let sanboxed: Awaited<ReturnType<typeof sandbox>>
-    beforeAll(async () => {
+    it.each([
+      {
+        name: 'in a page',
+        path: '/provided-request-context/page',
+        expectedLog: { source: '[page] /provided-request-context/page' },
+      },
+      {
+        name: 'in a route handler',
+        path: '/provided-request-context/route',
+        expectedLog: {
+          source: '[route handler] /provided-request-context/route',
+        },
+      },
+      {
+        name: 'in middleware',
+        path: '/provided-request-context/middleware',
+        expectedLog: {
+          source: '[middleware] /provided-request-context/middleware',
+        },
+      },
+    ])('$name', async ({ path, expectedLog }) => {
       resetLogIsolation() // sandbox resets `next.cliOutput` to empty
-      sanboxed = await sandbox(
+      await using _sandbox = await createSandbox(
         next,
         new Map([
           [
@@ -296,32 +315,7 @@ describe.each(runtimes)('unstable_after() in %s runtime', (runtimeValue) => {
           ],
         ])
       )
-    })
-    afterAll(async () => {
-      await sanboxed.cleanup()
-    })
 
-    it.each([
-      {
-        name: 'in a page',
-        path: '/provided-request-context/page',
-        expectedLog: { source: '[page] /provided-request-context/page' },
-      },
-      {
-        name: 'in a route handler',
-        path: '/provided-request-context/route',
-        expectedLog: {
-          source: '[route handler] /provided-request-context/route',
-        },
-      },
-      {
-        name: 'in middleware',
-        path: '/provided-request-context/middleware',
-        expectedLog: {
-          source: '[middleware] /provided-request-context/middleware',
-        },
-      },
-    ])('$name', async ({ path, expectedLog }) => {
       await next.browser(pathPrefix + path)
       await retry(() => {
         const logs = getLogs()

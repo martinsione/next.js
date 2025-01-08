@@ -1,4 +1,4 @@
-import type { IncomingHttpHeaders, OutgoingHttpHeaders } from 'http'
+import type { IncomingHttpHeaders, OutgoingHttpHeaders } from 'node:http'
 import type { SizeLimit } from '../../types'
 import type { RequestStore } from '../app-render/work-unit-async-storage.external'
 import type { AppRenderContext, GenerateFlight } from './app-render'
@@ -11,13 +11,18 @@ import {
   NEXT_ROUTER_STATE_TREE_HEADER,
   ACTION_HEADER,
 } from '../../client/components/app-router-headers'
-import { isNotFoundError } from '../../client/components/not-found'
+import {
+  getAccessFallbackHTTPStatus,
+  isHTTPAccessFallbackError,
+} from '../../client/components/http-access-fallback/http-access-fallback'
 import {
   getRedirectTypeFromError,
   getURLFromRedirectError,
+} from '../../client/components/redirect'
+import {
   isRedirectError,
   type RedirectType,
-} from '../../client/components/redirect'
+} from '../../client/components/redirect-error'
 import RenderResult from '../render-result'
 import type { WorkStore } from '../app-render/work-async-storage.external'
 import { FlightRenderResult } from './flight-render-result'
@@ -256,7 +261,7 @@ function getAppRelativeRedirectUrl(
   host: Host,
   redirectUrl: string
 ): URL | null {
-  if (redirectUrl.startsWith('/') || redirectUrl.startsWith('./')) {
+  if (redirectUrl.startsWith('/') || redirectUrl.startsWith('.')) {
     // Make sure we are appending the basePath to relative URLS
     return new URL(`${basePath}${redirectUrl}`, 'http://n')
   }
@@ -394,6 +399,44 @@ function limitUntrustedHeaderValueForLogs(value: string) {
   return value.length > 100 ? value.slice(0, 100) + '...' : value
 }
 
+export function parseHostHeader(
+  headers: IncomingHttpHeaders,
+  originDomain?: string
+) {
+  const forwardedHostHeader = headers['x-forwarded-host']
+  const forwardedHostHeaderValue =
+    forwardedHostHeader && Array.isArray(forwardedHostHeader)
+      ? forwardedHostHeader[0]
+      : forwardedHostHeader?.split(',')?.[0]?.trim()
+  const hostHeader = headers['host']
+
+  if (originDomain) {
+    return forwardedHostHeaderValue === originDomain
+      ? {
+          type: HostType.XForwardedHost,
+          value: forwardedHostHeaderValue,
+        }
+      : hostHeader === originDomain
+        ? {
+            type: HostType.Host,
+            value: hostHeader,
+          }
+        : undefined
+  }
+
+  return forwardedHostHeaderValue
+    ? {
+        type: HostType.XForwardedHost,
+        value: forwardedHostHeaderValue,
+      }
+    : hostHeader
+      ? {
+          type: HostType.Host,
+          value: hostHeader,
+        }
+      : undefined
+}
+
 type ServerModuleMap = Record<
   string,
   {
@@ -482,22 +525,7 @@ export async function handleAction({
     typeof req.headers['origin'] === 'string'
       ? new URL(req.headers['origin']).host
       : undefined
-
-  const forwardedHostHeader = req.headers['x-forwarded-host'] as
-    | string
-    | undefined
-  const hostHeader = req.headers['host']
-  const host: Host = forwardedHostHeader
-    ? {
-        type: HostType.XForwardedHost,
-        value: forwardedHostHeader,
-      }
-    : hostHeader
-      ? {
-          type: HostType.Host,
-          value: hostHeader,
-        }
-      : undefined
+  const host = parseHostHeader(req.headers)
 
   let warning: string | undefined = undefined
 
@@ -652,12 +680,19 @@ export async function handleAction({
             if (typeof action === 'function') {
               // Only warn if it's a server action, otherwise skip for other post requests
               warnBadServerActionRequest()
-              const actionReturnedState = await action()
-              formState = decodeFormState(
+
+              const actionReturnedState = await workUnitAsyncStorage.run(
+                requestStore,
+                action
+              )
+
+              formState = await decodeFormState(
                 actionReturnedState,
                 formData,
                 serverModuleMap
               )
+
+              requestStore.phase = 'render'
             }
 
             // Skip the fetch path
@@ -799,12 +834,19 @@ export async function handleAction({
             if (typeof action === 'function') {
               // Only warn if it's a server action, otherwise skip for other post requests
               warnBadServerActionRequest()
-              const actionReturnedState = await action()
+
+              const actionReturnedState = await workUnitAsyncStorage.run(
+                requestStore,
+                action
+              )
+
               formState = await decodeFormState(
                 actionReturnedState,
                 formData,
                 serverModuleMap
               )
+
+              requestStore.phase = 'render'
             }
 
             // Skip the fetch path
@@ -945,8 +987,8 @@ export async function handleAction({
         type: 'done',
         result: RenderResult.fromStatic(''),
       }
-    } else if (isNotFoundError(err)) {
-      res.statusCode = 404
+    } else if (isHTTPAccessFallbackError(err)) {
+      res.statusCode = getAccessFallbackHTTPStatus(err)
 
       await addRevalidationHeader(res, {
         workStore,
